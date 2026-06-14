@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EcoTank: Recycle or Perish</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a2e0a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Nunito', sans-serif;
+    overflow: hidden;
+  }
+
+  #ui-header {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 8px 24px;
+    background: rgba(0,0,0,0.5);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    border: 2px solid #4caf50;
+  }
+
+  #title-logo {
+    font-family: 'Fredoka One', cursive;
+    font-size: 22px;
+    color: #a8e063;
+    letter-spacing: 1px;
+    text-shadow: 0 0 12px #4caf5088;
+  }
+
+  .stat-block {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 14px;
+    color: #d4f5a0;
+  }
+
+  .stat-label { color: #7aad4a; font-size: 12px; }
+
+  #canvas-wrap {
+    position: relative;
+    border: 3px solid #4caf50;
+    border-radius: 8px;
+    box-shadow: 0 0 40px #2d6a0040, inset 0 0 60px #0a1a0480;
+    overflow: hidden;
+  }
+
+  canvas { display: block; }
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 25, 5, 0.88);
+    color: #a8e063;
+    font-family: 'Fredoka One', cursive;
+    text-align: center;
+    gap: 16px;
+    transition: opacity 0.3s;
+  }
+
+  #overlay.hidden { display: none; }
+
+  #overlay h1 {
+    font-size: 42px;
+    color: #c5f055;
+    text-shadow: 0 0 20px #6fcf0066;
+    line-height: 1.1;
+  }
+
+  #overlay p {
+    font-family: 'Nunito', sans-serif;
+    font-size: 15px;
+    color: #b2e080;
+    max-width: 380px;
+    line-height: 1.6;
+  }
+
+  #overlay button {
+    margin-top: 8px;
+    padding: 14px 40px;
+    font-family: 'Fredoka One', cursive;
+    font-size: 22px;
+    background: #4caf50;
+    color: #fff;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    box-shadow: 0 4px 20px #4caf5055;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  #overlay button:hover {
+    transform: scale(1.07);
+    box-shadow: 0 6px 30px #4caf5088;
+  }
+
+  #controls-hint {
+    font-size: 12px;
+    color: #6a9940;
+    margin-top: 4px;
+    font-family: 'Nunito', sans-serif;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui-header">
+  <div id="title-logo">🌿 EcoTank</div>
+  <div class="stat-block"><span class="stat-label">SCORE</span> <span id="score-val">0</span></div>
+  <div class="stat-block"><span class="stat-label">LEVEL</span> <span id="level-val">1</span></div>
+  <div class="stat-block"><span class="stat-label">♻️ SORTED</span> <span id="sorted-val">0</span></div>
+  <div class="stat-block"><span class="stat-label">❤️</span> <span id="lives-val">3</span></div>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="game" width="720" height="480"></canvas>
+  <div id="overlay">
+    <h1>🌿 EcoTank<br><span style="font-size:20px;color:#7cd05a">Recycle or Perish!</span></h1>
+    <p>Drive your leaf-tank through the forest. <strong>Shoot trash</strong> into recycling bins! Avoid enemy Smog-Tanks. Branches slow you down. Collect leaves for power-ups!</p>
+    <p style="font-size:13px;color:#8ac860">🎮 WASD / Arrows = Move &nbsp;|&nbsp; SPACE / Click = Shoot</p>
+    <button id="start-btn">🌱 Start Game</button>
+  </div>
+</div>
+<div id="controls-hint">WASD/Arrows: Move &nbsp;|&nbsp; Space/Click: Shoot &nbsp;|&nbsp; Aim with mouse</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ── State ─────────────────────────────────────────────
+let state = 'menu';
+let score = 0, level = 1, lives = 3, sorted = 0;
+let gameTime = 0;
+
+// ── Input ──────────────────────────────────────────────
+const keys = {};
+let mouseX = W/2, mouseY = H/2;
+window.addEventListener('keydown', e => { keys[e.code] = true; e.code==='Space' && e.preventDefault(); });
+window.addEventListener('keyup',   e => { keys[e.code] = false; });
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  mouseX = e.clientX - r.left; mouseY = e.clientY - r.top;
+});
+canvas.addEventListener('click', () => { if(state==='play') playerShoot(); });
+
+// ── Helpers ────────────────────────────────────────────
+const rand = (a,b) => Math.random()*(b-a)+a;
+const rInt = (a,b) => Math.floor(rand(a,b));
+const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+
+// ── World Objects ──────────────────────────────────────
+let player, bullets, enemies, trash, bins, branches, leaves, particles, powerups;
+let shootCooldown = 0;
+let spawnTimer = 0;
+let leafDrift = [];
+
+// ── Leaf Decorations (background) ─────────────────────
+function initLeafDrift() {
+  leafDrift = [];
+  for(let i=0;i<22;i++) leafDrift.push({
+    x: rand(0,W), y: rand(0,H),
+    size: rand(6,16), angle: rand(0,Math.PI*2),
+    spin: rand(-0.01,0.01), vy: rand(0.1,0.4),
+    vx: rand(-0.15,0.15), alpha: rand(0.08,0.2),
+    color: ['#3a7d00','#56a000','#6fcf00','#2e5a00','#a8e063'][rInt(0,5)]
+  });
+}
+
+// ── Trees / Branches (static obstacles) ───────────────
+function genBranches() {
+  branches = [];
+  const count = 8 + level*2;
+  const margin = 80;
+  for(let i=0;i<count;i++) {
+    const x = rand(margin, W-margin);
+    const y = rand(margin, H-margin);
+    // Avoid center spawn zone
+    if(Math.hypot(x-W/2, y-H/2) < 100) { i--; continue; }
+    branches.push({ x, y, w: rand(30,70), h: rand(12,22), angle: rand(-0.4,0.4) });
+  }
+}
+
+// ── Bins (recycling targets) ───────────────────────────
+const BIN_TYPES = [
+  { label:'PAPER', color:'#2196F3', trash:'paper' },
+  { label:'GLASS', color:'#9C27B0', trash:'glass' },
+  { label:'METAL', color:'#FF9800', trash:'metal' },
+];
+
+function genBins() {
+  bins = BIN_TYPES.map((t, i) => ({
+    ...t,
+    x: 60 + i*(W-120)/2,
+    y: H - 40,
+    w: 44, h: 36
+  }));
+}
+
+// ── Trash Items ────────────────────────────────────────
+const TRASH_LABELS = ['paper','glass','metal'];
+const TRASH_EMOJI  = { paper:'📄', glass:'🍾', metal:'🥫' };
+const TRASH_COLORS = { paper:'#90caf9', glass:'#ce93d8', metal:'#ffcc80' };
+
+function spawnTrash() {
+  const type = TRASH_LABELS[rInt(0,3)];
+  const edge = rInt(0,4);
+  let x,y;
+  if(edge===0){x=rand(20,W-20);y=-20;}
+  else if(edge===1){x=W+20;y=rand(20,H-80);}
+  else if(edge===2){x=rand(20,W-20);y=H+20;}
+  else{x=-20;y=rand(20,H-80);}
+  const angle = Math.atan2(H/2-y, W/2-x) + rand(-0.5,0.5);
+  trash.push({ x,y, type, angle, vx:Math.cos(angle)*rand(0.5,1.2), vy:Math.sin(angle)*rand(0.5,1.2), r:14 });
+}
+
+// ── Enemy Smog-Tanks ───────────────────────────────────
+function spawnEnemy() {
+  const edge = rInt(0,4);
+  let x,y;
+  if(edge===0){x=rand(30,W-30);y=-30;}
+  else if(edge===1){x=W+30;y=rand(30,H-80);}
+  else if(edge===2){x=rand(30,W-30);y=H+30;}
+  else{x=-30;y=rand(30,H-80);}
+  enemies.push({ x,y, angle:0, hp:2+level, vx:0, vy:0, shootTimer:rand(80,180), r:18 });
+}
+
+// ── Power-up Leaves ────────────────────────────────────
+function spawnLeaf() {
+  leaves.push({ x:rand(40,W-40), y:rand(40,H-100), r:10, spin:0, angle:rand(0,Math.PI*2), type:['speed','multi','shield'][rInt(0,3)] });
+}
+
+// ── Player ────────────────────────────────────────────
+function initPlayer() {
+  player = { x:W/2, y:H/2, angle:0, speed:0, vx:0, vy:0, r:18,
+    shield:0, speedBoost:0, multiShot:0, hit:0 };
+}
+
+// ── Init Game ─────────────────────────────────────────
+function initGame() {
+  score=0; level=1; lives=3; sorted=0; gameTime=0;
+  bullets=[]; enemies=[]; trash=[]; leaves=[]; particles=[]; powerups=[];
+  shootCooldown=0; spawnTimer=0;
+  initPlayer();
+  genBranches();
+  genBins();
+  spawnTrash(); spawnTrash(); spawnTrash();
+  spawnEnemy();
+  spawnLeaf();
+  updateUI();
+}
+
+function updateUI() {
+  document.getElementById('score-val').textContent = score;
+  document.getElementById('level-val').textContent = level;
+  document.getElementById('sorted-val').textContent = sorted;
+  document.getElementById('lives-val').textContent = '❤️'.repeat(lives);
+}
+
+// ── Shoot ──────────────────────────────────────────────
+function playerShoot() {
+  if(shootCooldown > 0) return;
+  const ang = Math.atan2(mouseY - player.y, mouseX - player.x);
+  const bx = player.x + Math.cos(ang)*22;
+  const by = player.y + Math.sin(ang)*22;
+  const spd = 7;
+  bullets.push({ x:bx, y:by, vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd, r:5, owner:'player', ang });
+  if(player.multiShot > 0) {
+    [-0.22,0.22].forEach(da => {
+      bullets.push({ x:bx, y:by, vx:Math.cos(ang+da)*spd, vy:Math.sin(ang+da)*spd, r:5, owner:'player', ang:ang+da });
+    });
+  }
+  shootCooldown = player.multiShot > 0 ? 10 : 18;
+  spawnParticles(bx, by, '#a8e063', 4, 2);
+}
+
+// ── Particles ──────────────────────────────────────────
+function spawnParticles(x, y, color, n, speed) {
+  for(let i=0;i<n;i++) {
+    const a = rand(0, Math.PI*2);
+    particles.push({ x,y, vx:Math.cos(a)*rand(0.5,speed), vy:Math.sin(a)*rand(0.5,speed),
+      r:rand(2,5), alpha:1, color, life:rand(20,40) });
+  }
+}
+
+// ── Draw Tank ──────────────────────────────────────────
+function drawTank(x, y, angle, color, accent, isPlayer, shieldOn) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  if(shieldOn) {
+    ctx.beginPath();
+    ctx.arc(0,0,26,0,Math.PI*2);
+    ctx.strokeStyle = '#00e5ff88';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  // Body
+  ctx.rotate(angle);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(-16,-12,32,24,6);
+  ctx.fill();
+
+  // Treads
+  ctx.fillStyle = accent;
+  ctx.fillRect(-17,-14,34,6);
+  ctx.fillRect(-17,8,34,6);
+
+  // Tread detail
+  ctx.fillStyle = '#0008';
+  for(let i=-14;i<16;i+=7){
+    ctx.fillRect(i,-14,4,6);
+    ctx.fillRect(i,8,4,6);
+  }
+
+  // Turret
+  ctx.fillStyle = isPlayer ? '#a8e063' : '#9e9e9e';
+  ctx.beginPath();
+  ctx.arc(0,0,9,0,Math.PI*2);
+  ctx.fill();
+
+  // Barrel
+  ctx.fillStyle = isPlayer ? '#6fcf00' : '#616161';
+  ctx.fillRect(6,-3,18,6);
+
+  if(isPlayer) {
+    // Leaf decals
+    ctx.fillStyle = '#56a00088';
+    for(let i=0;i<3;i++){
+      ctx.save();
+      ctx.rotate(i*1.2);
+      ctx.beginPath();
+      ctx.ellipse(4, 0, 5, 2.5, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  ctx.restore();
+}
+
+// ── Draw Branch ───────────────────────────────────────
+function drawBranch(b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(b.angle);
+
+  // Main branch
+  ctx.fillStyle = '#4a2c00';
+  ctx.beginPath();
+  ctx.roundRect(-b.w/2, -b.h/2, b.w, b.h, 4);
+  ctx.fill();
+
+  // Side twigs
+  ctx.strokeStyle = '#5a3600';
+  ctx.lineWidth = 3;
+  const twigs = Math.floor(b.w/12);
+  for(let i=0;i<twigs;i++){
+    const tx = -b.w/2 + (i+0.5)*b.w/twigs;
+    ctx.beginPath();
+    ctx.moveTo(tx, -b.h/2);
+    ctx.lineTo(tx + rand(-8,8), -b.h/2 - rand(10,20));
+    ctx.stroke();
+  }
+
+  // Leaves on branch
+  const leafCount = 3 + Math.floor(b.w/8);
+  for(let i=0;i<leafCount;i++){
+    const lx = -b.w/2 + rand(4, b.w-4);
+    const ly = -b.h/2 - rand(8,22);
+    const ls = rand(7,13);
+    const la = rand(0, Math.PI*2);
+    const lc = ['#3a7d00','#4caf50','#56a000','#6fcf00','#2e5a00'][rInt(0,5)];
+    ctx.fillStyle = lc;
+    ctx.save();
+    ctx.translate(lx, ly);
+    ctx.rotate(la);
+    ctx.beginPath();
+    ctx.ellipse(0,0,ls,ls/2,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+// ── Draw Bin ──────────────────────────────────────────
+function drawBin(b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.fillStyle = b.color;
+  ctx.beginPath();
+  ctx.roundRect(-b.w/2, -b.h/2, b.w, b.h, 6);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 9px Nunito';
+  ctx.textAlign = 'center';
+  ctx.fillText(b.label, 0, 3);
+  ctx.fillText('♻️', 0, -9);
+  ctx.restore();
+}
+
+// ── Draw Trash ────────────────────────────────────────
+function drawTrash(t) {
+  ctx.save();
+  ctx.translate(t.x, t.y);
+  ctx.fillStyle = TRASH_COLORS[t.type];
+  ctx.beginPath();
+  ctx.arc(0,0,t.r,0,Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = '#0005';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.font = `${t.r*1.2}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(TRASH_EMOJI[t.type], 0, 1);
+  ctx.restore();
+}
+
+// ── Draw Leaf Power-Up ────────────────────────────────
+const LEAF_COLORS = { speed:'#00e5ff', multi:'#ffeb3b', shield:'#76ff03' };
+const LEAF_LABELS = { speed:'⚡', multi:'🌿', shield:'🛡' };
+
+function drawLeafPU(l) {
+  ctx.save();
+  ctx.translate(l.x, l.y);
+  ctx.rotate(l.angle);
+  ctx.fillStyle = LEAF_COLORS[l.type];
+  ctx.shadowColor = LEAF_COLORS[l.type];
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.ellipse(0,0,12,6,0,0,Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.font = '12px serif';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText(LEAF_LABELS[l.type],0,0);
+  ctx.restore();
+}
+
+// ── Update ────────────────────────────────────────────
+function update() {
+  gameTime++;
+  if(shootCooldown > 0) shootCooldown--;
+  if(player.hit > 0) player.hit--;
+  if(player.shield > 0) player.shield--;
+  if(player.speedBoost > 0) player.speedBoost--;
+  if(player.multiShot > 0) player.multiShot--;
+
+  // Player movement
+  const spd = player.speedBoost > 0 ? 3.6 : 2.2;
+  let dx=0, dy=0;
+  if(keys['ArrowLeft']||keys['KeyA']) dx -= 1;
+  if(keys['ArrowRight']||keys['KeyD']) dx += 1;
+  if(keys['ArrowUp']||keys['KeyW']) dy -= 1;
+  if(keys['ArrowDown']||keys['KeyS']) dy += 1;
+  if(dx||dy){const len=Math.hypot(dx,dy);dx/=len;dy/=len;}
+  player.vx = dx*spd; player.vy = dy*spd;
+  player.x = clamp(player.x+player.vx, player.r, W-player.r);
+  player.y = clamp(player.y+player.vy, player.r, H-80-player.r);
+  player.angle = Math.atan2(mouseY-player.y, mouseX-player.x);
+
+  // Branch collision (slow player)
+  for(const b of branches) {
+    if(Math.abs(player.x-b.x)<b.w/2+player.r && Math.abs(player.y-b.y)<b.h/2+player.r) {
+      player.x -= player.vx*0.6;
+      player.y -= player.vy*0.6;
+    }
+  }
+
+  // Auto-shoot with space
+  if(keys['Space'] && shootCooldown<=0) playerShoot();
+
+  // Spawn
+  spawnTimer++;
+  if(spawnTimer > Math.max(60, 180-level*10)) {
+    spawnTimer = 0;
+    if(Math.random()<0.6) spawnTrash();
+    if(trash.length < 4+level && Math.random()<0.4) spawnTrash();
+    if(enemies.length < 1+level && Math.random()<0.5) spawnEnemy();
+    if(leaves.length < 2 && Math.random()<0.3) spawnLeaf();
+  }
+
+  // Move trash
+  for(const t of trash) {
+    t.x += t.vx; t.y += t.vy;
+    for(const b of branches) {
+      if(Math.abs(t.x-b.x)<b.w/2+t.r && Math.abs(t.y-b.y)<b.h/2+t.r) {
+        t.vx *= -0.5; t.vy *= -0.5;
+      }
+    }
+  }
+
+  // Move enemies
+  for(const e of enemies) {
+    const ang = Math.atan2(player.y-e.y, player.x-e.x);
+    e.vx += Math.cos(ang)*0.04;
+    e.vy += Math.sin(ang)*0.04;
+    const maxSpd = 1.2 + level*0.1;
+    const mv = Math.hypot(e.vx,e.vy);
+    if(mv>maxSpd){e.vx=e.vx/mv*maxSpd;e.vy=e.vy/mv*maxSpd;}
+    e.x += e.vx; e.y += e.vy;
+    e.x = clamp(e.x, e.r, W-e.r);
+    e.y = clamp(e.y, e.r, H-80-e.r);
+    e.angle = ang;
+    for(const b of branches) {
+      if(Math.abs(e.x-b.x)<b.w/2+e.r && Math.abs(e.y-b.y)<b.h/2+e.r) {
+        e.vx = -e.vx*0.5; e.vy = -e.vy*0.5;
+      }
+    }
+
+    // Enemy shoot
+    e.shootTimer--;
+    if(e.shootTimer <= 0) {
+      e.shootTimer = rand(80,180);
+      const bspd = 4;
+      bullets.push({ x:e.x+Math.cos(ang)*22, y:e.y+Math.sin(ang)*22,
+        vx:Math.cos(ang)*bspd, vy:Math.sin(ang)*bspd, r:5, owner:'enemy', ang });
+    }
+
+    // Enemy hits player
+    if(dist(e,player) < e.r+player.r) {
+      if(player.shield <= 0) { loseLife(); } else { player.hit = 20; }
+    }
+  }
+
+  // Move bullets
+  for(let i=bullets.length-1;i>=0;i--) {
+    const b = bullets[i];
+    b.x += b.vx; b.y += b.vy;
+    // Off screen
+    if(b.x<0||b.x>W||b.y<0||b.y>H){bullets.splice(i,1);continue;}
+
+    // Branch collision
+    let hit=false;
+    for(const br of branches) {
+      if(Math.abs(b.x-br.x)<br.w/2+b.r && Math.abs(b.y-br.y)<br.h/2+b.r) {
+        spawnParticles(b.x,b.y,'#4a2c00',3,2);
+        hit=true; break;
+      }
+    }
+    if(hit){bullets.splice(i,1);continue;}
+
+    if(b.owner==='player') {
+      // Hit trash → push toward bin
+      for(let j=trash.length-1;j>=0;j--) {
+        const t=trash[j];
+        if(dist(b,t)<b.r+t.r) {
+          t.vx+=b.vx*0.6; t.vy+=b.vy*0.6;
+          spawnParticles(t.x,t.y,TRASH_COLORS[t.type],5,3);
+          bullets.splice(i,1); break;
+        }
+      }
+      // Hit enemy
+      for(let j=enemies.length-1;j>=0;j--) {
+        const e=enemies[j];
+        if(dist(b,e)<b.r+e.r) {
+          e.hp--;
+          spawnParticles(e.x,e.y,'#ff7043',5,3);
+          bullets.splice(i,1);
+          if(e.hp<=0){
+            spawnParticles(e.x,e.y,'#ff5722',12,4);
+            enemies.splice(j,1);
+            score+=50; updateUI();
+          }
+          break;
+        }
+      }
+    } else {
+      // Enemy bullet hits player
+      if(dist(b,player)<b.r+player.r) {
+        if(player.shield > 0) {
+          spawnParticles(player.x,player.y,'#00e5ff',6,3);
+          player.hit=20;
+        } else {
+          loseLife();
+        }
+        bullets.splice(i,1);
+      }
+    }
+  }
+
+  // Trash hits bin
+  for(let j=trash.length-1;j>=0;j--) {
+    const t=trash[j];
+    for(const bn of bins) {
+      if(dist(t,{x:bn.x,y:bn.y})<t.r+bn.w/2+4) {
+        if(t.type===bn.trash) {
+          // Correct bin!
+          score+=20; sorted++;
+          spawnParticles(bn.x,bn.y,'#4caf50',10,4);
+          spawnParticles(t.x,t.y,'#a8e063',6,3);
+        } else {
+          // Wrong bin
+          spawnParticles(bn.x,bn.y,'#ff5722',8,3);
+          score=Math.max(0,score-5);
+        }
+        trash.splice(j,1);
+        updateUI();
+        break;
+      }
+    }
+  }
+
+  // Trash falls off map bottom
+  for(let j=trash.length-1;j>=0;j--){
+    if(trash[j].y>H+30||trash[j].x<-30||trash[j].x>W+30){
+      trash.splice(j,1);
+    }
+  }
+
+  // Player grabs leaf power-up
+  for(let j=leaves.length-1;j>=0;j--) {
+    const l=leaves[j];
+    l.angle += 0.03;
+    if(dist(l,player)<l.r+player.r) {
+      if(l.type==='speed') player.speedBoost=300;
+      if(l.type==='multi') player.multiShot=300;
+      if(l.type==='shield') player.shield=300;
+      spawnParticles(l.x,l.y,LEAF_COLORS[l.type],8,4);
+      leaves.splice(j,1);
+    }
+  }
+
+  // Background leaves drift
+  for(const l of leafDrift) {
+    l.x += l.vx; l.y += l.vy; l.angle += l.spin;
+    if(l.y > H+20) { l.y=-20; l.x=rand(0,W); }
+  }
+
+  // Particles
+  for(let i=particles.length-1;i>=0;i--) {
+    const p=particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.alpha-=1/p.life; p.r*=0.97;
+    if(p.alpha<=0) particles.splice(i,1);
+  }
+
+  // Level up
+  if(sorted >= 5*level) {
+    level++;
+    spawnParticles(W/2,H/2,'#a8e063',30,6);
+    genBranches();
+    updateUI();
+  }
+}
+
+function loseLife() {
+  if(player.hit>0) return;
+  lives--;
+  player.hit=120;
+  spawnParticles(player.x,player.y,'#ff5722',12,5);
+  updateUI();
+  if(lives<=0) gameOver();
+}
+
+function gameOver() {
+  state='over';
+  const ov=document.getElementById('overlay');
+  ov.innerHTML = `
+    <h1>🍂 Game Over!</h1>
+    <p>You sorted <strong>${sorted}</strong> items and reached <strong>Level ${level}</strong>!<br>
+    Final score: <strong>${score}</strong></p>
+    <p style="font-size:13px;color:#8ac860">Keep recycling to save the forest! 🌿</p>
+    <button id="start-btn">🌱 Play Again</button>
+  `;
+  ov.classList.remove('hidden');
+  document.getElementById('start-btn').onclick = startGame;
+}
+
+// ── Draw ───────────────────────────────────────────────
+function draw() {
+  // Background
+  const grad = ctx.createRadialGradient(W/2,H/2,60,W/2,H/2,W*0.8);
+  grad.addColorStop(0,'#1e3d0a');
+  grad.addColorStop(1,'#0d1f05');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+
+  // Grid pattern (soil texture)
+  ctx.strokeStyle = '#ffffff06';
+  ctx.lineWidth = 1;
+  for(let x=0;x<W;x+=32) { ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke(); }
+  for(let y=0;y<H;y+=32) { ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke(); }
+
+  // Background leaf drift
+  for(const l of leafDrift) {
+    ctx.save();
+    ctx.globalAlpha = l.alpha;
+    ctx.fillStyle = l.color;
+    ctx.translate(l.x,l.y);
+    ctx.rotate(l.angle);
+    ctx.beginPath();
+    ctx.ellipse(0,0,l.size,l.size/2,0,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Branches
+  for(const b of branches) drawBranch(b);
+
+  // Trash
+  for(const t of trash) drawTrash(t);
+
+  // Leaf power-ups
+  for(const l of leaves) drawLeafPU(l);
+
+  // Bins (bottom bar)
+  ctx.fillStyle = '#0d1f0599';
+  ctx.fillRect(0, H-70, W, 70);
+  ctx.strokeStyle = '#4caf5044';
+  ctx.lineWidth = 1;
+  ctx.beginPath();ctx.moveTo(0,H-70);ctx.lineTo(W,H-70);ctx.stroke();
+  for(const b of bins) drawBin(b);
+
+  // Bullets
+  for(const b of bullets) {
+    ctx.save();
+    ctx.translate(b.x,b.y);
+    if(b.owner==='player') {
+      ctx.fillStyle = '#c5f055';
+      ctx.shadowColor = '#a8e063';
+      ctx.shadowBlur = 8;
+    } else {
+      ctx.fillStyle = '#ff7043';
+      ctx.shadowColor = '#ff5722';
+      ctx.shadowBlur = 6;
+    }
+    ctx.beginPath();
+    ctx.arc(0,0,b.r,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Enemies
+  for(const e of enemies) {
+    drawTank(e.x, e.y, e.angle, '#4a4a4a','#333',false,false);
+    // HP bar
+    ctx.fillStyle='#333';
+    ctx.fillRect(e.x-16,e.y-28,32,5);
+    ctx.fillStyle='#f44336';
+    ctx.fillRect(e.x-16,e.y-28,(e.hp/(2+level))*32,5);
+  }
+
+  // Player
+  const flashOff = player.hit > 0 && Math.floor(player.hit/6)%2===0;
+  if(!flashOff) {
+    drawTank(player.x, player.y, player.angle, '#388e3c','#2e7d32',true, player.shield>0);
+  }
+
+  // Particles
+  for(const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Power-up HUD
+  let hx=8, hy=8;
+  const pus=[
+    player.speedBoost>0 && {label:'⚡ SPEED',c:'#00e5ff',t:player.speedBoost},
+    player.multiShot>0  && {label:'🌿 MULTI',c:'#ffeb3b',t:player.multiShot},
+    player.shield>0     && {label:'🛡 SHIELD',c:'#76ff03',t:player.shield},
+  ].filter(Boolean);
+  for(const pu of pus) {
+    ctx.fillStyle = pu.c+'33';
+    ctx.beginPath();
+    ctx.roundRect(hx,hy,90,22,6);
+    ctx.fill();
+    ctx.fillStyle = pu.c;
+    ctx.font = 'bold 11px Nunito';
+    ctx.textAlign='left';
+    ctx.fillText(pu.label, hx+8, hy+14);
+    ctx.fillStyle='#fff3';
+    ctx.fillRect(hx,hy+20,90,3);
+    ctx.fillStyle=pu.c;
+    ctx.fillRect(hx,hy+20,(pu.t/300)*90,3);
+    hx+=96;
+  }
+
+  // Sorted label hint above bins
+  ctx.font='10px Nunito';
+  ctx.fillStyle='#4caf5088';
+  ctx.textAlign='center';
+  ctx.fillText('SHOOT TRASH INTO MATCHING BINS', W/2, H-74);
+}
+
+// ── Loop ───────────────────────────────────────────────
+function loop() {
+  if(state==='play') {
+    update();
+    draw();
+  }
+  requestAnimationFrame(loop);
+}
+
+function startGame() {
+  document.getElementById('overlay').classList.add('hidden');
+  initGame();
+  initLeafDrift();
+  state='play';
+}
+
+document.getElementById('start-btn').onclick = startGame;
+loop();
+</script>
+</body>
+</html>
